@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>the算時間</title>
+  <title>跨裝置時間計算與計時器</title>
   <style>
     * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body { background-color: #f0f2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
@@ -23,8 +23,11 @@
     .duration-inputs { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
     .duration-field label { font-size: 0.75rem; color: #6b7280; display: block; margin-bottom: 4px; }
     
-    .btn-main { width: 100%; background: #2563eb; color: #fff; border: none; padding: 12px; border-radius: 8px; font-size: 1.05rem; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    .btn-group { display: flex; gap: 10px; margin-top: 10px; }
+    .btn-main { flex: 2; background: #2563eb; color: #fff; border: none; padding: 12px; border-radius: 8px; font-size: 1.05rem; font-weight: 600; cursor: pointer; transition: background 0.2s; }
     .btn-main:hover { background: #1d4ed8; }
+    .btn-reset { flex: 1; background: #fee2e2; color: #dc2626; border: none; padding: 12px; border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    .btn-reset:hover { background: #fecaca; }
     
     .result-card { background: #fafafa; border: 1px dashed #cbd5e1; border-radius: 12px; padding: 16px; margin-top: 24px; text-align: center; }
     .result-time { font-size: 1.3rem; font-weight: bold; color: #0f172a; margin: 8px 0; word-break: break-all; }
@@ -35,7 +38,7 @@
 <body>
 
 <div class="container">
-  <h1> 時間推算與同步計時器</h1>
+  <h1>⏳ 時間推算與同步計時器</h1>
 
   <!-- 房間資訊 -->
   <div class="room-bar">
@@ -68,7 +71,10 @@
     </div>
   </div>
 
-  <button class="btn-main" onclick="calculateAndSync()">計算並同步到雲端</button>
+  <div class="btn-group">
+    <button class="btn-main" onclick="calculateAndSync()">計算並同步</button>
+    <button class="btn-reset" onclick="resetRoom()">重設房間</button>
+  </div>
 
   <!-- 3. 結果與倒數 -->
   <div class="result-card">
@@ -78,15 +84,14 @@
     <div class="countdown-display" id="countdown-display">00:00:00</div>
   </div>
 
-  <div class="hint">把網址傳到手機開啟同一個房號，即可跨裝置即時觀看。</div>
+  <div class="hint">把網址傳到手機開啟同一個房號，即可跨裝置即時觀看與同步操作。</div>
 </div>
 
 <!-- Firebase 核心邏輯 -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-  import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+  import { getDatabase, ref, set, onValue, remove } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-  // 已填入你的專屬 Firebase Config
   const firebaseConfig = {
     apiKey: "AIzaSyB87U_onaC9v46-j88trj5gh5R6yrTuOpc",
     authDomain: "timer-d595e.firebaseapp.com",
@@ -104,10 +109,14 @@
   let targetTimestamp = null;
   let countdownTimer = null;
 
-  function init() {
+  function refreshNowTime() {
     const now = new Date();
     const localIso = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
     document.getElementById('base-time').value = localIso;
+  }
+
+  function init() {
+    refreshNowTime();
 
     const urlParams = new URLSearchParams(window.location.search);
     let room = urlParams.get('room');
@@ -128,6 +137,8 @@
         const data = snapshot.val();
         if (data && data.targetTime) {
           setTargetTime(data.targetTime);
+        } else {
+          clearTargetDisplay();
         }
       });
     } catch (e) {
@@ -148,7 +159,6 @@
     const targetDate = new Date(baseDate.getTime() + totalAddedMs);
 
     const targetIso = targetDate.toISOString();
-    
     setTargetTime(targetIso);
 
     if (database && roomRef) {
@@ -158,6 +168,26 @@
       });
     }
   };
+
+  // 一鍵重設房間
+  window.resetRoom = function() {
+    refreshNowTime();
+    document.getElementById('dur-days').value = 0;
+    document.getElementById('dur-hours').value = 0;
+    document.getElementById('dur-mins').value = 30;
+    clearTargetDisplay();
+
+    if (database && roomRef) {
+      remove(roomRef); // 從資料庫移除該節點
+    }
+  };
+
+  function clearTargetDisplay() {
+    targetTimestamp = null;
+    if (countdownTimer) clearInterval(countdownTimer);
+    document.getElementById('target-display').innerText = "--";
+    document.getElementById('countdown-display').innerText = "00:00:00";
+  }
 
   function setTargetTime(isoString) {
     const targetDate = new Date(isoString);
