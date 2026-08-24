@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>跨裝置時間計算與計時器</title>
+  <style>
+    * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: #f0f2f5; margin: 0; padding: 20px; display: flex; justify-content: center; }
+    .container { background: #fff; width: 100%; max-width: 480px; border-radius: 16px; padding: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+    h1 { font-size: 1.4rem; text-align: center; margin-top: 0; color: #1a1a1a; }
+    
+    .room-bar { background: #eef2ff; border-radius: 8px; padding: 10px 14px; font-size: 0.85rem; color: #4338ca; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+    .room-bar strong { font-size: 0.95rem; }
+    
+    .section-title { font-size: 0.95rem; font-weight: 600; color: #4b5563; margin-bottom: 8px; }
+    .input-group { margin-bottom: 18px; }
+    input[type="datetime-local"], input[type="number"], input[type="text"] {
+      width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 1rem; outline: none;
+    }
+    input:focus { border-color: #3b82f6; ring: 2px solid #bfdbfe; }
+    
+    .duration-inputs { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .duration-field label { font-size: 0.75rem; color: #6b7280; display: block; margin-bottom: 4px; }
+    
+    .btn-main { width: 100%; background: #2563eb; color: #fff; border: none; padding: 12px; border-radius: 8px; font-size: 1.05rem; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    .btn-main:hover { background: #1d4ed8; }
+    
+    .result-card { background: #fafafa; border: 1px dashed #cbd5e1; border-radius: 12px; padding: 16px; margin-top: 24px; text-align: center; }
+    .result-time { font-size: 1.3rem; font-weight: bold; color: #0f172a; margin: 8px 0; word-break: break-all; }
+    .countdown-display { font-size: 1.1rem; font-weight: 600; color: #dc2626; margin-top: 6px; }
+    .hint { font-size: 0.75rem; color: #9ca3af; text-align: center; margin-top: 16px; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h1>⏳ 時間推算與同步計時器</h1>
+
+  <!-- 房間資訊 -->
+  <div class="room-bar">
+    <div>房號：<strong id="room-id">載入中</strong></div>
+    <div style="cursor: pointer; text-decoration: underline;" onclick="copyShareLink()">📋 複製手機連結</div>
+  </div>
+
+  <!-- 1. 基準時間 -->
+  <div class="input-group">
+    <div class="section-title">1. 起始基準時間</div>
+    <input type="datetime-local" id="base-time">
+  </div>
+
+  <!-- 2. 經過多久 -->
+  <div class="input-group">
+    <div class="section-title">2. 經過多久時間後？</div>
+    <div class="duration-inputs">
+      <div class="duration-field">
+        <label>天數 (Days)</label>
+        <input type="number" id="dur-days" min="0" value="0">
+      </div>
+      <div class="duration-field">
+        <label>小時 (Hours)</label>
+        <input type="number" id="dur-hours" min="0" value="0">
+      </div>
+      <div class="duration-field">
+        <label>分鐘 (Mins)</label>
+        <input type="number" id="dur-mins" min="0" value="30">
+      </div>
+    </div>
+  </div>
+
+  <button class="btn-main" onclick="calculateAndSync()">計算並同步到雲端</button>
+
+  <!-- 3. 結果與倒數 -->
+  <div class="result-card">
+    <div class="section-title" style="margin-bottom: 2px;">目標到達時間</div>
+    <div class="result-time" id="target-display">--</div>
+    <div class="section-title" style="margin-top: 10px; margin-bottom: 2px;">距離目標剩餘</div>
+    <div class="countdown-display" id="countdown-display">00:00:00</div>
+  </div>
+
+  <div class="hint">把網址傳到手機開啟同一個房號，即可跨裝置即時觀看。</div>
+</div>
+
+<!-- Firebase 與 核心邏輯腳本 -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+  import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
+
+  // ---【如果日後有申請 Firebase，把這裡換成你的 Config】---
+  const firebaseConfig = {
+    apiKey: "YOUR_API_KEY",
+    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
+    databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
+    projectId: "YOUR_PROJECT_ID",
+    storageBucket: "YOUR_PROJECT_ID.appspot.com",
+    messagingSenderId: "YOUR_SENDER_ID",
+    appId: "YOUR_APP_ID"
+  };
+
+  let database = null;
+  let roomRef = null;
+  let currentRoom = "";
+  let targetTimestamp = null;
+  let countdownTimer = null;
+
+  // 1. 初始化房號與時間
+  function init() {
+    // 預設填入「現在時間」
+    const now = new Date();
+    // 轉換成 local ISO 格式 (YYYY-MM-DDTHH:mm)
+    const localIso = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    document.getElementById('base-time').value = localIso;
+
+    // 解析網址房號
+    const urlParams = new URLSearchParams(window.location.search);
+    let room = urlParams.get('room');
+    if (!room) {
+      room = Math.random().toString(36).substring(2, 8);
+      const newUrl = `${window.location.pathname}?room=${room}`;
+      window.history.replaceState({ path: newUrl }, '', newUrl);
+    }
+    currentRoom = room;
+    document.getElementById('room-id').innerText = currentRoom;
+
+    // 嘗試連接 Firebase
+    try {
+      if (firebaseConfig.apiKey !== "YOUR_API_KEY") {
+        const app = initializeApp(firebaseConfig);
+        database = getDatabase(app);
+        roomRef = ref(database, `rooms/${currentRoom}`);
+        
+        // 監聽雲端資料同步
+        onValue(roomRef, (snapshot) => {
+          const data = snapshot.val();
+          if (data && data.targetTime) {
+            setTargetTime(data.targetTime);
+          }
+        });
+      }
+    } catch (e) {
+      console.warn("Firebase 未配置或連線失敗，目前為本地運作模式。");
+    }
+  }
+
+  // 2. 計算目標時間並同步
+  window.calculateAndSync = function() {
+    const baseVal = document.getElementById('base-time').value;
+    if (!baseVal) return alert('請選擇起始時間');
+
+    const days = parseInt(document.getElementById('dur-days').value) || 0;
+    const hours = parseInt(document.getElementById('dur-hours').value) || 0;
+    const mins = parseInt(document.getElementById('dur-mins').value) || 0;
+
+    const baseDate = new Date(baseVal);
+    // 加上指定的毫秒數
+    const totalAddedMs = ((days * 24 + hours) * 60 + mins) * 60 * 1000;
+    const targetDate = new Date(baseDate.getTime() + totalAddedMs);
+
+    const targetIso = targetDate.toISOString();
+    
+    // 更新本地畫面
+    setTargetTime(targetIso);
+
+    // 同步到 Firebase
+    if (database && roomRef) {
+      set(roomRef, {
+        targetTime: targetIso,
+        updatedAt: Date.now()
+      });
+    }
+  };
+
+  // 3. 設定目標時間與啟動倒數
+  function setTargetTime(isoString) {
+    const targetDate = new Date(isoString);
+    targetTimestamp = targetDate.getTime();
+    document.getElementById('target-display').innerText = targetDate.toLocaleString();
+
+    if (countdownTimer) clearInterval(countdownTimer);
+    updateCountdown();
+    countdownTimer = setInterval(updateCountdown, 1000);
+  }
+
+  // 4. 更新倒數顯示
+  function updateCountdown() {
+    if (!targetTimestamp) return;
+    const now = Date.now();
+    const diff = targetTimestamp - now;
+
+    if (diff <= 0) {
+      document.getElementById('countdown-display').innerText = "時間已到達！";
+      return;
+    }
+
+    const d = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const h = Math.floor((diff / (1000 * 60 * 60)) % 24);
+    const m = Math.floor((diff / 1000 / 60) % 60);
+    const s = Math.floor((diff / 1000) % 60);
+
+    let displayStr = "";
+    if (d > 0) displayStr += `${d}天 `;
+    displayStr += `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    
+    document.getElementById('countdown-display').innerText = displayStr;
+  }
+
+  // 5. 複製分享連結
+  window.copyShareLink = function() {
+    navigator.clipboard.writeText(window.location.href);
+    alert('已複製網址！發送到手機打開即可同步：\n' + window.location.href);
+  };
+
+  init();
+</script>
+
+</body>
+</html>
