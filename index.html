@@ -18,7 +18,7 @@
     input[type="datetime-local"], input[type="number"], input[type="text"] {
       width: 100%; padding: 10px 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 1rem; outline: none;
     }
-    input:focus { border-color: #3b82f6; ring: 2px solid #bfdbfe; }
+    input:focus { border-color: #3b82f6; }
     
     .duration-inputs { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
     .duration-field label { font-size: 0.75rem; color: #6b7280; display: block; margin-bottom: 4px; }
@@ -81,20 +81,21 @@
   <div class="hint">把網址傳到手機開啟同一個房號，即可跨裝置即時觀看。</div>
 </div>
 
-<!-- Firebase 與 核心邏輯腳本 -->
+<!-- Firebase 核心邏輯 -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
   import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js";
 
-  // ---【如果日後有申請 Firebase，把這裡換成你的 Config】---
+  // 已填入你的專屬 Firebase Config
   const firebaseConfig = {
-    apiKey: "YOUR_API_KEY",
-    authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-    databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebaseio.com",
-    projectId: "YOUR_PROJECT_ID",
-    storageBucket: "YOUR_PROJECT_ID.appspot.com",
-    messagingSenderId: "YOUR_SENDER_ID",
-    appId: "YOUR_APP_ID"
+    apiKey: "AIzaSyB87U_onaC9v46-j88trj5gh5R6yrTuOpc",
+    authDomain: "timer-d595e.firebaseapp.com",
+    databaseURL: "https://timer-d595e-default-rtdb.firebaseio.com",
+    projectId: "timer-d595e",
+    storageBucket: "timer-d595e.firebasestorage.app",
+    messagingSenderId: "493224828193",
+    appId: "1:493224828193:web:210bfff9f606a0e23f7260",
+    measurementId: "G-8YWE1XX0CT"
   };
 
   let database = null;
@@ -103,15 +104,11 @@
   let targetTimestamp = null;
   let countdownTimer = null;
 
-  // 1. 初始化房號與時間
   function init() {
-    // 預設填入「現在時間」
     const now = new Date();
-    // 轉換成 local ISO 格式 (YYYY-MM-DDTHH:mm)
     const localIso = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
     document.getElementById('base-time').value = localIso;
 
-    // 解析網址房號
     const urlParams = new URLSearchParams(window.location.search);
     let room = urlParams.get('room');
     if (!room) {
@@ -122,27 +119,22 @@
     currentRoom = room;
     document.getElementById('room-id').innerText = currentRoom;
 
-    // 嘗試連接 Firebase
     try {
-      if (firebaseConfig.apiKey !== "YOUR_API_KEY") {
-        const app = initializeApp(firebaseConfig);
-        database = getDatabase(app);
-        roomRef = ref(database, `rooms/${currentRoom}`);
-        
-        // 監聽雲端資料同步
-        onValue(roomRef, (snapshot) => {
-          const data = snapshot.val();
-          if (data && data.targetTime) {
-            setTargetTime(data.targetTime);
-          }
-        });
-      }
+      const app = initializeApp(firebaseConfig);
+      database = getDatabase(app);
+      roomRef = ref(database, `rooms/${currentRoom}`);
+      
+      onValue(roomRef, (snapshot) => {
+        const data = snapshot.val();
+        if (data && data.targetTime) {
+          setTargetTime(data.targetTime);
+        }
+      });
     } catch (e) {
-      console.warn("Firebase 未配置或連線失敗，目前為本地運作模式。");
+      console.error("Firebase 連線失敗:", e);
     }
   }
 
-  // 2. 計算目標時間並同步
   window.calculateAndSync = function() {
     const baseVal = document.getElementById('base-time').value;
     if (!baseVal) return alert('請選擇起始時間');
@@ -152,16 +144,13 @@
     const mins = parseInt(document.getElementById('dur-mins').value) || 0;
 
     const baseDate = new Date(baseVal);
-    // 加上指定的毫秒數
     const totalAddedMs = ((days * 24 + hours) * 60 + mins) * 60 * 1000;
     const targetDate = new Date(baseDate.getTime() + totalAddedMs);
 
     const targetIso = targetDate.toISOString();
     
-    // 更新本地畫面
     setTargetTime(targetIso);
 
-    // 同步到 Firebase
     if (database && roomRef) {
       set(roomRef, {
         targetTime: targetIso,
@@ -170,7 +159,6 @@
     }
   };
 
-  // 3. 設定目標時間與啟動倒數
   function setTargetTime(isoString) {
     const targetDate = new Date(isoString);
     targetTimestamp = targetDate.getTime();
@@ -181,7 +169,6 @@
     countdownTimer = setInterval(updateCountdown, 1000);
   }
 
-  // 4. 更新倒數顯示
   function updateCountdown() {
     if (!targetTimestamp) return;
     const now = Date.now();
@@ -204,7 +191,6 @@
     document.getElementById('countdown-display').innerText = displayStr;
   }
 
-  // 5. 複製分享連結
   window.copyShareLink = function() {
     navigator.clipboard.writeText(window.location.href);
     alert('已複製網址！發送到手機打開即可同步：\n' + window.location.href);
